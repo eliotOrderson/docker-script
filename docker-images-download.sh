@@ -17,7 +17,7 @@ usage() {
     echo "Download Docker images using skopeo and aria2c with segmented downloading"
     echo ""
     echo "Options:"
-    echo "  -d, --dir DIR           Output directory for downloaded blobs (default: $OUTPUT_DIR)"
+    echo "  -d, --dir               Output directory for downloaded blobs (default: $OUTPUT_DIR)"
     echo "  -v, --verbose           Enable verbose output"
     echo "  -c, --connections       N  Number of connections for segmented downloading (default: $CONNECTIONS)"
     echo "  -arch, --architecture   select images architecture (default: $ARCH)"
