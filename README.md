@@ -3,6 +3,8 @@ docker pull may repeatedly download images due to network issues. Therefore, I w
 
 
 # Usage 
+```
+```shell
 Usage: ./docker-images-download.sh [OPTIONS] IMAGE_NAME
 Download Docker images using skopeo and aria2c with segmented downloading
 
@@ -14,3 +16,4 @@ Options:
   -h, --help              Show this help message
 
 Example: ./docker-images-download.sh -d docker-layers -v -c 4 alpine:latest
+```
