@@ -1,4 +1,4 @@
 .claude
 .mcp.json
-./alpine-docker
-./docker-layers
+alpine-docker
+docker-layers

@@ -237,6 +237,8 @@ download_blob() {
         --continue=true \
         --split=$CONNECTIONS \
         --max-connection-per-server=8 \
+        --max-tries=15 \
+        --retry-wait=5 \
         --min-split-size=1M \
         --dir="$(dirname "$output_file")" \
         --out="$(basename "$output_file")" \
