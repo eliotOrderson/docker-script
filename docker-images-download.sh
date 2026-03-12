@@ -1,5 +1,4 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 # docker-download.sh - Download Docker images using skopeo and aria2c with segmented downloading
 
 set -euo pipefail
@@ -218,17 +217,18 @@ download_blob() {
     # First, get the redirect URL using curl with the Bearer token
     log "Getting redirect URL for blob $digest"
 
-    set +e
-    response=$(curl -s -f -H "Authorization: Bearer $token" \
-        -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-        -I "$blob_url")
-    if [ $? -ne 0 ]; then
-        err "Get redirect URL for blob $digest, please check network connection"
+    redirect_url=$(curl -s \
+        --connect-timeout 30 \
+        --max-time 60 \
+        -H "Authorization: Bearer $token" \
+        -w "%{redirect_url}" \
+        -o /dev/null \
+        "$blob_url")
+
+    if [ -z "$redirect_url" ]; then
+        err "Failed to get redirect URL for blob $digest"
         return 1
     fi
-    set -e
-
-    redirect_url=$(echo "$response" | grep "^location:" | sed -E 's/^location: ([^\r]+).*/\1/')
     log "Following redirect to $redirect_url"
 
     # Use aria2c to download from the redirect URL without Authorization header

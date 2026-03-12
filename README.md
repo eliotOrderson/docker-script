@@ -1,9 +1,18 @@
 # docker-script
-docker pull may repeatedly download images due to network issues. Therefore, I wrote this script using skopeo and aria2c to enable resumable downloads of image layers, and then import them into Docker.
 
+`docker pull` may repeatedly download images due to network issues. This script uses `skopeo` and `aria2c` to enable resumable downloads of image layers, and then import them into Docker.
 
-# Usage 
-``` shell
+## Requirements
+
+- **bash** (4.0+)
+- **skopeo** - Container image operations
+- **aria2c** - Segmented downloading with resume support
+- **curl** - HTTP requests
+- **jq** - JSON parsing
+
+## Usage
+
+```shell
 Usage: ./docker-images-download.sh [OPTIONS] IMAGE_NAME
 Download Docker images using skopeo and aria2c with segmented downloading
 
@@ -16,3 +25,15 @@ Options:
 
 Example: ./docker-images-download.sh -d docker-layers -v -c 4 alpine:latest
 ```
+
+## Load Downloaded Images
+
+After downloading, use skopeo to load the image into Docker:
+
+```shell
+skopeo copy dir:./docker-layers docker-daemon:alpine:latest
+```
+
+## License
+
+MIT
