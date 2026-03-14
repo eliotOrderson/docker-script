@@ -3,12 +3,17 @@
 
 set -euo pipefail
 
+# Save original script arguments for potential rerun
+SCRIPT_ARGS=("$0" "$@")
+
 # Default values
 ARCH=amd64
 VERBOSE=false
 CACHE_TIME=300
 OUTPUT_DIR="./docker-blobs"
 CONNECTIONS=1
+MAX_RERUN=3
+RERUN_COUNT=${RERUN_COUNT:-0}
 
 # Function to print usage
 usage() {
@@ -211,22 +216,46 @@ download_blob() {
     local token="$5"
 
     local blob_url="https://$registry/v2/$repository/blobs/$digest"
+    local max_tries=3
+    local try_count=0
 
     log "Downloading blob $digest to $output_file"
 
     # First, get the redirect URL using curl with the Bearer token
     log "Getting redirect URL for blob $digest"
 
-    redirect_url=$(curl -s \
-        --connect-timeout 30 \
-        --max-time 60 \
-        -H "Authorization: Bearer $token" \
-        -w "%{redirect_url}" \
-        -o /dev/null \
-        "$blob_url")
+    while [ $try_count -lt $max_tries ]; do
+        try_count=$((try_count + 1))
+        log "Attempt $try_count/$max_tries to get redirect URL for blob $digest"
+
+        redirect_url=$(curl -s \
+            --connect-timeout 30 \
+            --max-time 60 \
+            -H "Authorization: Bearer $token" \
+            -w "%{redirect_url}" \
+            -o /dev/null \
+            "$blob_url" || true)
+
+        if [ -n "$redirect_url" ]; then
+            break
+        fi
+
+        if [ $try_count -lt $max_tries ]; then
+            err "Failed to get redirect URL for blob $digest (attempt $try_count/$max_tries), retrying in 5 seconds..."
+            sleep 5
+        fi
+    done
 
     if [ -z "$redirect_url" ]; then
-        err "Failed to get redirect URL for blob $digest"
+        err "Failed to get redirect URL for blob $digest after $max_tries attempts"
+
+        # Rerun the program if rerun count is within limit
+        if [ "$RERUN_COUNT" -lt "$MAX_RERUN" ]; then
+            err "Rerunning the program (attempt $((RERUN_COUNT + 1))/$MAX_RERUN)..."
+            export RERUN_COUNT=$((RERUN_COUNT + 1))
+            exec "${SCRIPT_ARGS[@]}"
+        fi
+
         return 1
     fi
     log "Following redirect to $redirect_url"
@@ -278,9 +307,9 @@ main() {
     # Extract the registry (default to docker.io)
     local registry="registry-1.docker.io"
 
-    # Parse manifest to get layers
+    # Parse manifest to get layers (handle both .Layers and .layers)
     local layers
-    layers=$(echo "$manifest" | jq -r '.Layers[]')
+    layers=$(echo "$manifest" | jq -r '(.Layers // .layers) // [] | .[]' 2>/dev/null || true)
 
     if [ -z "$layers" ]; then
         err "No layers found in manifest"
@@ -289,9 +318,17 @@ main() {
 
     # Download each layer (blob)
     local layer_count=0
+    local skipped_count=0
     for digest in $layers; do
         layer_count=$((layer_count + 1))
         local output_file="$OUTPUT_DIR/$(echo "$digest" | sed 's/sha256://')"
+
+        # Skip if file already exists
+        if [ -f "$output_file" ]; then
+            log "Layer $layer_count already exists, skipping: $output_file"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
 
         download_blob "$registry" "$repository" "$digest" "$output_file" "$token"
         if [ $? -ne 0 ]; then
@@ -299,7 +336,10 @@ main() {
             exit 1
         fi
     done
-    log "Successfully downloaded $layer_count layers"
+    if [ $skipped_count -gt 0 ]; then
+        log "Skipped $skipped_count existing layers"
+    fi
+    log "Successfully downloaded $((layer_count - skipped_count)) layers"
 
 }
 
@@ -307,20 +347,36 @@ main() {
 main "$@"
 
 manifests_raw=$(cached_run "raw-manifests" $CACHE_TIME get_manifest $IMAGE_NAME --raw)
-digest=$(echo $manifests_raw | jq -r '.manifests[] | select(.platform.architecture =='\"$ARCH\"' and .platform.os == "linux") | .digest')
 
-log "skopeo oci manifest hash name: ${digest##*:}"
+# Check if this is a manifest list (multi-arch) or single arch image
+is_manifest_list=$(echo "$manifests_raw" | jq -r 'has("manifests")' 2>/dev/null || echo "false")
 
-image_pkg_name="${IMAGE_NAME%%:*}"
-image_pkg_version="${IMAGE_NAME##*:}"
+if [ "$is_manifest_list" = "true" ]; then
+    # Multi-arch image: select the architecture-specific manifest
+    digest=$(echo "$manifests_raw" | jq -r '.manifests[] | select(.platform.architecture == "'"$ARCH"'" and .platform.os == "linux") | .digest' | head -1)
+else
+    # Single-arch image: use the manifest directly
+    digest=""
+fi
 
-skopeo_oci_manifest=$(cached_run "skopeo-oci-manifest" $CACHE_TIME get_manifest "$image_pkg_name@$digest" --raw)
-echo $skopeo_oci_manifest >$OUTPUT_DIR/manifest.json
-echo "Directory Transport Version: 1.1" >$OUTPUT_DIR/version
+if [ -n "$digest" ]; then
+    log "skopeo oci manifest hash name: ${digest##*:}"
+    image_pkg_name="${IMAGE_NAME%%:*}"
+    skopeo_oci_manifest=$(cached_run "skopeo-oci-manifest" $CACHE_TIME get_manifest "$image_pkg_name@$digest" --raw)
+else
+    log "Single architecture image, using manifest directly"
+    skopeo_oci_manifest="$manifests_raw"
+fi
 
-skopeo_oci_config=$(cached_run "skopeo-oci-config" $CACHE_TIME get_manifest $IMAGE_NAME --raw --config)
-skopeo_oci_config_name=$(echo $skopeo_oci_manifest | jq -r '.config .digest | sub("^sha256:"; "")')
-echo -n $skopeo_oci_config >$OUTPUT_DIR/$skopeo_oci_config_name
+echo "$skopeo_oci_manifest" >"$OUTPUT_DIR/manifest.json"
+echo "Directory Transport Version: 1.1" >"$OUTPUT_DIR/version"
+
+skopeo_oci_config=$(cached_run "skopeo-oci-config" $CACHE_TIME get_manifest "$IMAGE_NAME" --raw --config)
+skopeo_oci_config_name=$(echo "$skopeo_oci_manifest" | jq -r '.config.digest | sub("^sha256:"; "")' 2>/dev/null || echo "")
+
+if [ -n "$skopeo_oci_config_name" ]; then
+    echo -n "$skopeo_oci_config" >"$OUTPUT_DIR/$skopeo_oci_config_name"
+fi
 
 log "skopeo oci format generate complete"
-log 'Use the cmd load to docker: skopeo copy' dir:$OUTPUT_DIR docker-daemon:$IMAGE_NAME
+log "Use the cmd load to docker: skopeo copy dir:$OUTPUT_DIR docker-daemon:$IMAGE_NAME"
