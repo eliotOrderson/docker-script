@@ -384,4 +384,11 @@ docker_image_name="$IMAGE_NAME"
 if [[ "$docker_image_name" != *":"* ]]; then
     docker_image_name="$docker_image_name:latest"
 fi
-log "Use the cmd load to docker: skopeo copy dir:$OUTPUT_DIR docker-daemon:$docker_image_name"
+
+if [ -S "$XDG_RUNTIME_DIR/docker.sock" ]; then
+    DOCKER_HOST="unix://$XDG_RUNTIME_DIR/docker.sock"
+    log "Rootless Use the cmd load to docker: skopeo copy --dest-daemon-host $DOCKER_HOST \\"
+    echo "dir:$OUTPUT_DIR docker-daemon:$docker_image_name"
+else
+    log "Use the cmd load to docker: skopeo copy dir:$OUTPUT_DIR docker-daemon:$docker_image_name"
+fi
