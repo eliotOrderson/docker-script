@@ -114,16 +114,15 @@ cached_run() {
         return 0
     fi
 
-    result=$("${cmd[@]}")
-    if [ $? -ne 0 ]; then
-        rm -f "$cache_file.tmp"
-        err "Run the cmd error: ${cmd[@]}"
-        exit 1
-    else
-        echo $result >$cache_file.tmp
-        log "Cache the $key"
+    if "${cmd[@]}" >"$cache_file.tmp"; then
         mv "$cache_file.tmp" "$cache_file"
         cat "$cache_file"
+        log "Cache the $key"
+    else
+        local status=$?
+        rm -f "$cache_file.tmp"
+        err "Run the cmd error: ${cmd[*]}"
+        return $status
     fi
 }
 
