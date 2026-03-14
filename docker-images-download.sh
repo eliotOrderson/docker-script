@@ -379,4 +379,10 @@ if [ -n "$skopeo_oci_config_name" ]; then
 fi
 
 log "skopeo oci format generate complete"
-log "Use the cmd load to docker: skopeo copy dir:$OUTPUT_DIR docker-daemon:$IMAGE_NAME"
+
+# Ensure image name has a tag for docker-daemon destination
+docker_image_name="$IMAGE_NAME"
+if [[ "$docker_image_name" != *":"* ]]; then
+    docker_image_name="$docker_image_name:latest"
+fi
+log "Use the cmd load to docker: skopeo copy dir:$OUTPUT_DIR docker-daemon:$docker_image_name"
